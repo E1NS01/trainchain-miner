@@ -1,19 +1,98 @@
-import { Worker } from "worker_threads";
+import os from "os";
+import readline from "readline";
+import { spawn } from "child_process";
 import { io } from "socket.io-client";
 
-const numThreads = process.argv[2] || 4; // Or any other user-defined number
-const workers = new Map(); // Store workers by their IDs
-let difficulty = 64;
+const maxThreads = os.cpus().length;
+let numWorkers = null;
 let lastBlock = null;
-let mining = false;
-let restartMiningDueToDifficultyChange = false;
+let difficulty = null;
+let sentBlocks = new Set();
+let workers = [];
 
-export const socket = io("http://localhost:3000");
+const socket = io("http://localhost:3000");
 
-socket.on("connect", () => {
-  getDifficulty();
-  getLastBlock();
+socket.on("disconnect", () => {
+  socket.connect();
 });
+
+socket.on("getLastBlock", (data) => {
+  lastBlock = data;
+});
+
+socket.on("getDifficulty", (data) => {
+  difficulty = data;
+  sentBlocks.clear();
+});
+
+socket.on("newBlock", (data) => {
+  lastBlock = data;
+  restartAllWorkers();
+});
+
+const rl = readline.createInterface({
+  input: process.stdin,
+  output: process.stdout,
+});
+
+function runWorker(id) {
+  if (!lastBlock || difficulty === null) {
+    console.log("Waiting for initial data...");
+    setTimeout(() => runWorker(id), 1000);
+    return;
+  }
+
+  const worker = spawn("node", [
+    "minerWorker.js",
+    id.toString(),
+    difficulty.toString(),
+    lastBlock.hash,
+  ]);
+
+  workers[id] = worker;
+
+  worker.stdout.on("data", (data) => {
+    try {
+      const output = JSON.parse(data.toString().trim());
+      if (sentBlocks.has(output.hash)) {
+        console.log(`Duplicate block found by worker ${id}, restarting...`);
+        restartWorker(id);
+      } else {
+        console.log("Worker " + id + ": ", output.hash);
+        socket.emit("newBlock", output);
+        sentBlocks.add(output.hash);
+        restartWorker(id);
+      }
+    } catch (error) {
+      console.error(`Error processing worker ${id} output:`, error);
+    }
+  });
+}
+
+function startWorkers(num) {
+  for (let i = 0; i < num; i++) {
+    runWorker(i);
+  }
+}
+
+function restartWorker(id) {
+  if (workers[id]) {
+    workers[id].removeAllListeners();
+    workers[id].kill();
+  }
+  runWorker(id);
+}
+
+function restartAllWorkers() {
+  workers.forEach((worker, id) => {
+    if (worker) {
+      worker.removeAllListeners();
+      worker.kill();
+    }
+  });
+  workers = [];
+  startWorkers(numWorkers);
+}
 
 function getLastBlock() {
   socket.emit("getLastBlock");
@@ -22,80 +101,23 @@ function getLastBlock() {
 function getDifficulty() {
   socket.emit("getDifficulty");
 }
+getLastBlock();
+getDifficulty();
+rl.question(
+  `Enter the number of threads to run (1-${maxThreads}, default is ${maxThreads}): `,
+  (answer) => {
+    rl.close();
 
-socket.on("difficulty", (newDifficulty) => {
-  if (newDifficulty !== 64 - difficulty) {
-    console.log(`Difficulty changed to ${newDifficulty}`);
-    difficulty = 64 - newDifficulty;
+    numWorkers = parseInt(answer);
+
+    if (isNaN(numWorkers) || numWorkers < 1) {
+      numWorkers = maxThreads;
+    } else if (numWorkers > maxThreads) {
+      numWorkers = maxThreads;
+    }
+
+    console.log("Starting", numWorkers, "workers...");
+
+    startWorkers(numWorkers);
   }
-  if (mining) {
-    // Indicate that mining needs to be restarted due to a difficulty change
-    restartMiningDueToDifficultyChange = true;
-    stopAllWorkers(); // Implement this function to stop all workers
-  } else {
-    startMining(difficulty);
-    mining = true;
-  }
-});
-
-socket.on("getLastBlock", (block) => {
-  lastBlock = block;
-});
-
-function stopAllWorkers() {
-  workers.forEach((worker, workerId) => {
-    worker.terminate().then(() => {
-      workers.delete(workerId);
-      // Once all workers are stopped, restart mining if needed
-      if (workers.size === 0 && restartMiningDueToDifficultyChange) {
-        restartMiningDueToDifficultyChange = false;
-        startMining(difficulty); // This will start workers with the updated difficulty
-        mining = true;
-      }
-    });
-  });
-}
-
-function startMining() {
-  if (restartMiningDueToDifficultyChange) {
-    return;
-  }
-  const target = BigInt(
-    "0x" + "0".repeat(64 - difficulty) + "f".repeat(difficulty)
-  );
-
-  for (let i = 0; i < numThreads; i++) {
-    startWorker(i + 1);
-  }
-
-  function startWorker(workerId) {
-    const worker = new Worker("./minerWorker.js");
-    workers.set(workerId, worker);
-
-    worker.postMessage({
-      id: workerId,
-      difficulty,
-      target,
-      previousHash: lastBlock ? lastBlock.hash : "",
-    });
-    console.clear();
-
-    worker.on("message", (message) => {
-      if (message.mined) {
-        socket.emit("newBlock", message.block);
-
-        worker.terminate().then(() => {
-          workers.delete(workerId);
-          setTimeout(() => {
-            startWorker(workerId);
-          }, 50);
-        });
-
-        getDifficulty();
-        getLastBlock();
-      }
-    });
-  }
-}
-
-export default socket;
+);

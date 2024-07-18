@@ -1,28 +1,26 @@
-import { parentPort } from "worker_threads";
 import { Block } from "./block.js";
 
-parentPort.on("message", (data) => {
-  const { id, difficulty, target, previousHash } = data;
-  mineBlock(id, difficulty, target, previousHash);
-});
+const id = process.argv[2];
+const difficulty = 64 - process.argv[3];
+const previousHash = process.argv[4];
+const target = BigInt(
+  "0x" + "0".repeat(64 - difficulty) + "f".repeat(difficulty)
+);
 
-parentPort.on("error", (error) => {
-  console.error(`Worker ${id} error:`, error);
-});
-
-function mineBlock(id, difficulty, target, previousHash) {
+function findHash() {
+  let found = false;
   const block = new Block(0, Date.now(), "NewBlock", previousHash, "");
 
-  while (true) {
+  while (!found) {
     block.nonce = parseInt(Math.random() * 1000000);
     block.hash = block.calculateHash();
     const hashBigInt = BigInt("0x" + block.hash);
 
     if (hashBigInt < target) {
-      console.clear();
-      console.log(`Worker ${id}: Block mined: ${block.hash}`);
-      parentPort.postMessage({ id, mined: true, block });
-      return;
+      process.stdout.write(JSON.stringify(block) + "\n");
+      found = true;
     }
   }
 }
+
+findHash();

@@ -6,7 +6,7 @@ module.exports = {
   entry: "./main.js", // Entry point of your application
   output: {
     path: path.resolve(__dirname, "dist"), // Output directory
-    filename: "bundle.js", // Output file name
+    filename: "bundle.cjs", // Output file name
   },
   resolve: {
     extensions: [".js"], // File extensions to process
