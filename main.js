@@ -103,7 +103,7 @@ function getDifficulty() {
 }
 getLastBlock();
 getDifficulty();
-console.log(Math.random() * Number.MAX_SAFE_INTEGER);
+
 rl.question(
   `Enter the number of threads to run (1-${maxThreads}, default is ${maxThreads}): `,
   (answer) => {
