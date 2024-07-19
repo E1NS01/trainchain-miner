@@ -10,9 +10,10 @@ const target = BigInt(
 function findHash() {
   let found = false;
   const block = new Block(0, Date.now(), "NewBlock", previousHash, "");
+  block.nonce = id * 10000000;
 
   while (!found) {
-    block.nonce = parseInt(Math.random() * 1000000);
+    block.nonce++;
     block.hash = block.calculateHash();
     const hashBigInt = BigInt("0x" + block.hash);
 
