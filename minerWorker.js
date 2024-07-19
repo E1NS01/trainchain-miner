@@ -13,7 +13,7 @@ function findHash() {
   block.nonce = id * 10000000;
 
   while (!found) {
-    block.nonce++;
+    block.nonce = parseInt(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER));
     block.hash = block.calculateHash();
     const hashBigInt = BigInt("0x" + block.hash);
 
